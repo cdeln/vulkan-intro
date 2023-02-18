@@ -1,0 +1,28 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]
+then
+    echo "Usage: $0 <debug|release> [...]"
+    exit 1
+fi
+
+mode=$1
+
+if [ $mode == debug ]
+then
+    prefix=out/debug
+elif [ $mode == release ]
+then
+    prefix=out/release
+else
+    echo "Invalid mode $mode, please select either debug or release"
+    exit 1
+fi
+
+if [ ! -d $prefix ]
+then
+    echo "Project not configured, please run ./scripts/configure first"
+    exit 1
+fi
+
+cmake --build $prefix "${@:2}"

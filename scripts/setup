@@ -1,0 +1,7 @@
+#!/bin/bash
+
+apt-get install -y \
+    libvulkan-dev \
+    vulkan-validationlayers-dev \
+    vulkan-tools \
+    spirv-tools

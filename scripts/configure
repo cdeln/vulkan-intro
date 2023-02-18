@@ -1,0 +1,27 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]
+then
+    echo "Usage: $0 <debug|release> [...]"
+    exit 1
+fi
+
+mode=$1
+
+if [ $mode == debug ]
+then
+    prefix=out/debug
+    build_type=Debug
+elif [ $mode == release ]
+then
+    prefix=out/release
+    build_type=Release
+else
+    echo "Invalid mode $mode, please select either debug or release"
+    exit 1
+fi
+
+cmake -S . -B $prefix \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_BUILD_TYPE=$build_type \
+    "${@:2}"
