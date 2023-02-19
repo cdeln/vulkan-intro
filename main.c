@@ -53,14 +53,25 @@ int main()
     /// Note that we have to explicitly set the type of the application info structure.
     /// That seems like a common point of error, and setting this wrong leads to undefined behaviour.
     /// The reason why the type exist is so that the drivers can dynamically figure out types from objects passed in.
-    printf("Creating instance\n");
+#ifndef NDEBUG
+    const uint32_t validationLayerCount = 1;
+    const char * validationLayers[] = {
+        "VK_LAYER_KHRONOS_validation"
+    };
+#else
+    const uint32_t validationLayerCount = 0;
+    const char** validationLayers = NULL;
+#endif
+    printf("Creating instance with %d validation layers\n", validationLayerCount);
     VkApplicationInfo appInfo = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .apiVersion = VK_API_VERSION_1_0
     };
     VkInstanceCreateInfo instanceCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pApplicationInfo = &appInfo
+        .pApplicationInfo = &appInfo,
+        .enabledLayerCount = validationLayerCount,
+        .ppEnabledLayerNames = validationLayers
     };
     VkInstance instance;
     if (vkCreateInstance(&instanceCreateInfo, NULL, &instance) != VK_SUCCESS)
@@ -128,10 +139,10 @@ int main()
     }
 
     printf("Selecting a suitable physical device\n");
-    VkPhysicalDevice physicalDevice;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties physicalDeviceProperties;
-    uint32_t physicalDeviceIndex;
-    uint32_t queueFamilyIndex;
+    uint32_t physicalDeviceIndex = 0;
+    uint32_t queueFamilyIndex = 0;
     for (physicalDeviceIndex = 0; physicalDeviceIndex < physicalDeviceCount; ++physicalDeviceIndex)
     {
         physicalDevice = physicalDevices[physicalDeviceIndex];
