@@ -284,6 +284,7 @@ int main()
 
 
     /// Create the image for storing depth.
+    /// The image needs separately allocated memory.
     printf("Creating image\n");
     VkExtent3D imageExtent = {
         .width = IMAGE_WIDTH,
@@ -312,6 +313,44 @@ int main()
         printf("Failed to create image: %s\n", resultString(code));
         return EXIT_FAILURE;
     }
+
+    VkMemoryRequirements imageMemoryRequirements;
+    vkGetImageMemoryRequirements(device, image, &imageMemoryRequirements);
+
+    VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &physicalDeviceMemoryProperties);
+    VkMemoryPropertyFlags imageMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t memoryTypeIndex;
+    for (memoryTypeIndex = 0; memoryTypeIndex < physicalDeviceMemoryProperties.memoryTypeCount; ++memoryTypeIndex) {
+        if (imageMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex)) {
+            if ((physicalDeviceMemoryProperties.memoryTypes[memoryTypeIndex].propertyFlags & imageMemoryProperties) == imageMemoryProperties) {
+                break;
+            }
+        }
+    }
+    if (memoryTypeIndex == physicalDeviceMemoryProperties.memoryTypeCount)
+    {
+        printf("Failed to find suitable physical device memory matching image memory requirements\n");
+        return EXIT_FAILURE;
+    }
+
+    VkMemoryAllocateInfo imageAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = imageMemoryRequirements.size,
+        .memoryTypeIndex = memoryTypeIndex
+    };
+    VkDeviceMemory imageMemory;
+    if (vkAllocateMemory(device, &imageAllocateInfo, NULL, &imageMemory) != VK_SUCCESS)
+    {
+        printf("Failed to allocate image memory\n");
+        return EXIT_FAILURE;
+    }
+    if (vkBindImageMemory(device, image, imageMemory, 0) != VK_SUCCESS)
+    {
+        printf("Failed to bind image memory\n");
+        return EXIT_FAILURE;
+    }
+
 
     printf("Creating image view\n");
     VkImageViewCreateInfo imageViewCreateInfo = {
@@ -374,8 +413,8 @@ int main()
     free(vertexShaderCode);
 
     printf("Creating graphics pipeline\n");
-    VkPipelineShaderStageCreateInfo pipelineShaderStageCrateInfos[] = {
-        [0] = {
+    VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfos[] = {
+        {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_VERTEX_BIT,
             .module = vertexShaderModule,
@@ -409,7 +448,8 @@ int main()
     };
     VkPipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = VK_POLYGON_MODE_FILL
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1.0f
     };
     VkPipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo = {
         VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -430,7 +470,7 @@ int main()
     VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 1,
-        .pStages = pipelineShaderStageCrateInfos,
+        .pStages = pipelineShaderStageCreateInfos,
         .pVertexInputState = &vertexInputStateCreateInfo,
         .pInputAssemblyState = &inputAssemblyStateCreateInfo,
         .pViewportState = &viewportStateCreateInfo,
@@ -494,7 +534,7 @@ int main()
     vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
     VkClearValue clearValue = { .depthStencil = {1.0, 0} };
     VkRenderPassBeginInfo renderPassBeginInfo = {
-        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = renderPass,
         .framebuffer = framebuffer,
         .renderArea = { { 0, 0 }, { scissor.extent.width, scissor.extent.height } },
@@ -512,12 +552,34 @@ int main()
     }
 
 
-    /// Finally, tear down the system by destroying objects in reverse order of creation.
-    /// Before destruction of each object we will make sure it is not in use anymore.
+    /// Now it is time to submit the recorded command buffer to the queue and execute the graphics pipeline.
+    printf("Submitting commands to queue\n");
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &commandBuffer
+    };
+    if (vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
+    {
+        printf("Failed to submit command buffer to queue\n");
+        return EXIT_FAILURE;
+    }
+
     printf("Waiting until device is idle\n");
     vkDeviceWaitIdle(device);
 
-    printf("Destorying vertex shader module\n");
+    /// Finally, tear down the system by destroying objects in reverse order of creation.
+    /// Before destruction of each object we will make sure it is not in use anymore.
+    printf("Destroying image view\n");
+    vkDestroyImageView(device, imageView, NULL);
+
+    printf("Destroying image\n");
+    vkDestroyImage(device, image, NULL);
+
+    printf("Releasing image memory\n");
+    vkFreeMemory(device, imageMemory, NULL);
+
+    printf("Destroying vertex shader module\n");
     vkDestroyShaderModule(device, vertexShaderModule, NULL);
 
     printf("Releasing command buffers\n");
@@ -525,6 +587,18 @@ int main()
 
     printf("Destroying command pool\n");
     vkDestroyCommandPool(device, commandPool, NULL);
+
+    printf("Destroying pipeline\n");
+    vkDestroyPipeline(device, graphicsPipeline, NULL);
+
+    printf("Destroying pipeline layout\n");
+    vkDestroyPipelineLayout(device, pipelineLayout, NULL);
+
+    printf("Destroying framebuffer\n");
+    vkDestroyFramebuffer(device, framebuffer, NULL);
+
+    printf("Destroying render pass\n");
+    vkDestroyRenderPass(device, renderPass, NULL);
 
     printf("Destroying device\n");
     vkDestroyDevice(device, NULL);
