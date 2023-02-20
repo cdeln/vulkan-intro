@@ -23,11 +23,46 @@
 ///     https://devdocs.io/vulkan
 ///
 /// Make sure to install the necessary tools. On Ubuntu you should install the `vulkan-tools` package which gives you the `vulkaninfo` command.
+///
+/// Notes about the Vulkan API
+///
+///     1. The API makes almost no assumption about its usage.
+///        This is the reason why so much code is required for so little action.
+///     2. The API is decoupled. Almost every entity can be created with minimal information about other entities.
+///        For example, a framebuffer can be created independently of a render pass.
+///        A render pass describes dependencies between attachments in render sub passes, and a framebuffer describes which images should be used as attachments.
+///        Hence, different framebuffers can be used with a single render pass, and different render passes can be used with a single framebuffer.
 
 #include <vulkan/vulkan.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <vulkan/vulkan_core.h>
+
+#ifndef BUILD_TYPE
+#define BUILD_TYPE ""
+#endif
+
+#define VERTEX_SHADER_SOURCE_PATH "out/" BUILD_TYPE "/shader.vert.spv"
+#define IMAGE_WIDTH 400
+#define IMAGE_HEIGHT 400
+
+
+#define STR(name) #name
+#define CASE_STR(name) case name : return STR(name)
+
+const char*
+resultString(VkResult code)
+{
+    switch (code)
+    {
+        CASE_STR(VK_SUCCESS);
+        CASE_STR(VK_ERROR_OUT_OF_HOST_MEMORY);
+        CASE_STR(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        default: return "UNKNOWN";
+    }
+}
 
 
 int main()
@@ -135,7 +170,7 @@ int main()
     if (physicalDeviceCount == 0)
     {
         printf("Found no physical device\n");
-        return EXIT_SUCCESS;
+        return EXIT_FAILURE;
     }
 
     printf("Selecting a suitable physical device\n");
@@ -206,10 +241,292 @@ int main()
     vkGetDeviceQueue(device, queueFamilyIndex, 0, &queue);
 
 
+    /// Setting up the graphics pipeline
+
+    /// In order to render something, we need to define a render pass, a framebuffer and a graphics pipeline.
+    printf("Creating render pass\n");
+    VkAttachmentDescription attachmentDescription = {
+        .flags = 0,
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .samples = 1,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
+    VkAttachmentReference attachmentReference = {
+        0,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
+    VkSubpassDescription subpassDescription = {
+        0,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        0, NULL,
+        0, NULL, NULL,
+        &attachmentReference,
+        0, NULL
+    };
+    VkRenderPass renderPass;
+    VkRenderPassCreateInfo renderPassCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &attachmentDescription,
+        .subpassCount = 1,
+        .pSubpasses = &subpassDescription
+    };
+    if (vkCreateRenderPass(device, &renderPassCreateInfo, NULL, &renderPass) != VK_SUCCESS)
+    {
+        printf("Failed to create render pass\n");
+        return EXIT_FAILURE;
+    }
+
+
+    /// Create the image for storing depth.
+    printf("Creating image\n");
+    VkExtent3D imageExtent = {
+        .width = IMAGE_WIDTH,
+        .height = IMAGE_HEIGHT,
+        .depth = 1
+    };
+    VkImageCreateInfo imageCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .extent = imageExtent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queueFamilyIndex,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VkImage image;
+    VkResult code;
+    if ((code = vkCreateImage(device, &imageCreateInfo, NULL, &image)) != VK_SUCCESS)
+    {
+        printf("Failed to create image: %s\n", resultString(code));
+        return EXIT_FAILURE;
+    }
+
+    printf("Creating image view\n");
+    VkImageViewCreateInfo imageViewCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = imageCreateInfo.format,
+        .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+        .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 }
+    };
+    VkImageView imageView;
+    if (vkCreateImageView(device, &imageViewCreateInfo, NULL, &imageView) != VK_SUCCESS)
+    {
+        printf("Failed to create image view\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("Creating framebuffer\n");
+    VkFramebufferCreateInfo framebufferCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = renderPass,
+        .attachmentCount = 1,
+        .pAttachments = &imageView,
+        .width = imageExtent.width,
+        .height = imageExtent.height,
+        .layers = 1
+    };
+    VkFramebuffer framebuffer;
+    if (vkCreateFramebuffer(device, &framebufferCreateInfo, NULL, &framebuffer) != VK_SUCCESS)
+    {
+        printf("Failed to create framebuffer\n");
+        return EXIT_FAILURE;
+    }
+
+
+    printf("Creating vertex shader module from %s\n", VERTEX_SHADER_SOURCE_PATH);
+    if (access(VERTEX_SHADER_SOURCE_PATH, F_OK))
+    {
+        printf("Missing vertex shader code at: %s\n", VERTEX_SHADER_SOURCE_PATH);
+        return EXIT_FAILURE;
+    }
+    FILE* vertexShaderFile = fopen(VERTEX_SHADER_SOURCE_PATH, "r");
+    fseek(vertexShaderFile, 0, SEEK_END);
+    long vertexShaderCodeSize = ftell(vertexShaderFile);
+    rewind(vertexShaderFile);
+    uint32_t* vertexShaderCode = malloc(1 + 4 * (vertexShaderCodeSize / 4)); // multiple of 4 bytes
+    fread(vertexShaderCode, 1, vertexShaderCodeSize, vertexShaderFile);
+    VkShaderModuleCreateInfo vertexShaderModuleCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = vertexShaderCodeSize,
+        .pCode = vertexShaderCode
+    };
+    fclose(vertexShaderFile);
+    VkShaderModule vertexShaderModule;
+    if (vkCreateShaderModule(device, &vertexShaderModuleCreateInfo, NULL, &vertexShaderModule) != VK_SUCCESS)
+    {
+        printf("Failed to create vertex shader module\n");
+        return EXIT_FAILURE;
+    }
+    free(vertexShaderCode);
+
+    printf("Creating graphics pipeline\n");
+    VkPipelineShaderStageCreateInfo pipelineShaderStageCrateInfos[] = {
+        [0] = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vertexShaderModule,
+            .pName = "main"
+        }
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    };
+
+    VkViewport viewport = {
+        .width = IMAGE_WIDTH,
+        .height = IMAGE_HEIGHT,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+    VkRect2D scissor = {
+        .extent = { IMAGE_WIDTH, IMAGE_HEIGHT }
+    };
+    VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor
+    };
+    VkPipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL
+    };
+    VkPipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo = {
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS
+    };
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    };
+    VkPipelineLayout pipelineLayout;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout) != VK_SUCCESS)
+    {
+        printf("Failed to create pipeline layout\n");
+        return EXIT_FAILURE;
+    }
+
+    VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 1,
+        .pStages = pipelineShaderStageCrateInfos,
+        .pVertexInputState = &vertexInputStateCreateInfo,
+        .pInputAssemblyState = &inputAssemblyStateCreateInfo,
+        .pViewportState = &viewportStateCreateInfo,
+        .pRasterizationState = &pipelineRasterizationStateCreateInfo,
+        .pMultisampleState = NULL,
+        .pDepthStencilState = &pipelineDepthStencilStateCreateInfo,
+        .layout = pipelineLayout,
+        .renderPass = renderPass
+    };
+    VkPipeline graphicsPipeline;
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, NULL, &graphicsPipeline) != VK_SUCCESS)
+    {
+        printf("Failed to create graphics pipeline\n");
+        return EXIT_FAILURE;
+    }
+
+
+    /// Vulkan communicate with the device using commands send over the queue.
+    /// It is inefficient to send one command at a time, so we will record the commands we want to perform in a command buffer and send it over once.
+    /// Before we can create a command buffer, we need to create a command pool.
+    /// The commands recorded in a command buffer must be compatible with the family of the queue they are sent over.
+    /// The command pool is like a factory for command buffers, they are connected to a specific queue family on our device.
+    /// Command pools also let us record command buffers in parallel in separate threads, with one pool per thread.
+    printf("Creating command pool\n");
+    VkCommandPoolCreateInfo commandPoolCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = queueFamilyIndex
+    };
+    VkCommandPool commandPool;
+    if (vkCreateCommandPool(device, &commandPoolCreateInfo, NULL, &commandPool) != VK_SUCCESS)
+    {
+        printf("Failed to create command pool\n");
+        return EXIT_FAILURE;
+    }
+
+    /// With a command pool we can create a command buffer from it.
+    /// To create the command buffer we specify a command pool to create a level.
+    /// There are two command buffer levels in Vulkan: primary and secondary.
+    /// Primary level command buffers can be submitted to queues, while secondary are called from primary commands.
+    printf("Allocating command buffer\n");
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkCommandBuffer commandBuffer;
+    if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &commandBuffer) != VK_SUCCESS)
+    {
+        printf("Failed to allocate command buffer\n");
+        return EXIT_FAILURE;
+    }
+
+
+    /// Let us record some commands for execution into the allocated command buffer.
+    /// This is the first time we are actually going "to do something", everything else up to this point is setup code.
+    printf("Recording command buffer\n");
+    VkCommandBufferBeginInfo commandBufferBeginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    };
+    vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
+    VkClearValue clearValue = { .depthStencil = {1.0, 0} };
+    VkRenderPassBeginInfo renderPassBeginInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .renderPass = renderPass,
+        .framebuffer = framebuffer,
+        .renderArea = { { 0, 0 }, { scissor.extent.width, scissor.extent.height } },
+        .clearValueCount = 1,
+        .pClearValues = &clearValue
+    };
+    vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    vkCmdEndRenderPass(commandBuffer);
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+    {
+        printf("Failed to end recording of command buffer\n");
+        return EXIT_FAILURE;
+    }
+
+
     /// Finally, tear down the system by destroying objects in reverse order of creation.
     /// Before destruction of each object we will make sure it is not in use anymore.
-    printf("Destroying device\n");
+    printf("Waiting until device is idle\n");
     vkDeviceWaitIdle(device);
+
+    printf("Destorying vertex shader module\n");
+    vkDestroyShaderModule(device, vertexShaderModule, NULL);
+
+    printf("Releasing command buffers\n");
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+
+    printf("Destroying command pool\n");
+    vkDestroyCommandPool(device, commandPool, NULL);
+
+    printf("Destroying device\n");
     vkDestroyDevice(device, NULL);
 
     printf("Destroying instance\n");
