@@ -50,8 +50,8 @@
 #endif
 
 #define VERTEX_SHADER_SOURCE_PATH "out/" BUILD_TYPE "/shader.vert.spv"
-#define IMAGE_WIDTH 400
-#define IMAGE_HEIGHT 400
+#define IMAGE_WIDTH 20
+#define IMAGE_HEIGHT 20
 
 
 #define STR(name) #name
@@ -72,6 +72,8 @@ resultString(VkResult code)
 
 int main()
 {
+    const uint32_t imagePixelCount = IMAGE_WIDTH * IMAGE_HEIGHT;
+
     /// First step is to create an instance object.
     /// This is where we specify global stuff such as info about our application, which validation layers and extensions that we want to load.
     /// The instance object is an opaque handle, which will be used to get physical devices with later on.
@@ -254,10 +256,10 @@ int main()
         .flags = 0,
         .format = VK_FORMAT_D24_UNORM_S8_UINT,
         .samples = 1,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
@@ -550,6 +552,7 @@ int main()
     printf("Creating command pool\n");
     VkCommandPoolCreateInfo commandPoolCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = queueFamilyIndex
     };
     VkCommandPool commandPool;
@@ -581,10 +584,11 @@ int main()
     /// This is the first time we are actually going "to do something", everything else up to this point is setup code.
     printf("Recording command buffer\n");
     VkCommandBufferBeginInfo commandBufferBeginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
-    VkClearValue clearValue = { .depthStencil = {1.0, 0} };
+    VkClearValue clearValue = { .depthStencil = {1.0f, 0} };
     VkRenderPassBeginInfo renderPassBeginInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = renderPass,
@@ -597,37 +601,6 @@ int main()
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
-
-    VkImageMemoryBarrier imageMemoryBarrier = {
-        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .srcQueueFamilyIndex = queueFamilyIndex,
-        .dstQueueFamilyIndex = queueFamilyIndex,
-        .image = image,
-        .subresourceRange = imageSubresourceRange
-    };
-    vkCmdPipelineBarrier(commandBuffer,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0,
-                         0, NULL,
-                         0, NULL,
-                         1, &imageMemoryBarrier);
-
-    VkBufferImageCopy imageRegion = {
-        .imageSubresource = {
-            .aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT,
-            .mipLevel       = imageSubresourceRange.baseMipLevel,
-            .baseArrayLayer = imageSubresourceRange.baseArrayLayer,
-            .layerCount     = imageSubresourceRange.levelCount
-        },
-        .imageExtent = imageExtent
-    };
-    vkCmdCopyImageToBuffer(commandBuffer, image, imageMemoryBarrier.newLayout, imageBuffer, 1, &imageRegion);
-
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
     {
         printf("Failed to end recording of command buffer\n");
@@ -651,17 +624,73 @@ int main()
     printf("Waiting until device is idle\n");
     vkDeviceWaitIdle(device);
 
+
+    printf("Reading image to buffer\n");
+    vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
+    VkImageMemoryBarrier imageMemoryBarrier = {
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = queueFamilyIndex,
+        .dstQueueFamilyIndex = queueFamilyIndex,
+        .image = image,
+        .subresourceRange = imageSubresourceRange
+    };
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0,
+                         0, NULL,
+                         0, NULL,
+                         1, &imageMemoryBarrier);
+    VkBufferImageCopy imageRegion = {
+        .imageSubresource = {
+            .aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .mipLevel       = imageSubresourceRange.baseMipLevel,
+            .baseArrayLayer = imageSubresourceRange.baseArrayLayer,
+            .layerCount     = imageSubresourceRange.levelCount
+        },
+        .imageExtent = imageExtent
+    };
+    vkCmdCopyImageToBuffer(commandBuffer, image, imageMemoryBarrier.newLayout, imageBuffer, 1, &imageRegion);
+    vkEndCommandBuffer(commandBuffer);
+
+    if (vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
+    {
+        printf("Failed to submit command buffer to queue\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("Waiting until device is idle\n");
+    vkDeviceWaitIdle(device);
+
     printf("Reading back pixels to host\n");
     void* mappedImageBufferMemory;
-    void* depthData = malloc(imageBufferCreateInfo.size);
+    uint32_t* imageData = malloc(imageBufferCreateInfo.size);
     vkMapMemory(device, imageBufferMemory, 0, imageBufferCreateInfo.size, 0, &mappedImageBufferMemory);
-    memcpy(depthData, mappedImageBufferMemory, imageBufferCreateInfo.size);
+    memcpy(imageData, mappedImageBufferMemory, imageBufferCreateInfo.size);
     vkUnmapMemory(device, imageBufferMemory);
 
-    FILE* outputFile = fopen("out.dat", "w");
-    fwrite(depthData, 1, imageBufferCreateInfo.size, outputFile);
-    fclose(outputFile);
+    float* depthData = malloc(imagePixelCount * sizeof(float));
+    for (uint32_t i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; ++i) {
+        uint32_t unormDepth = imageData[i] >> 1;
+        depthData[i] = ((float) unormDepth) / ((1 << 23) - 1);
+        if (unormDepth  == ((1<<23) - 1)) {
+            depthData[i] = 0;
+        }
+    }
+    free(imageData);
 
+    FILE* outputFile = fopen("out.dat", "w");
+    for (uint32_t i = 0; i < IMAGE_WIDTH; ++i) {
+        for (uint32_t j = 0; j < IMAGE_HEIGHT; ++j) {
+            fprintf(outputFile, "%.4f ", depthData[IMAGE_WIDTH * i + j]);
+        }
+        fprintf(outputFile, "\n");
+    }
+    fclose(outputFile);
     free(depthData);
 
     /// Finally, tear down the system by destroying objects in reverse order of creation.
