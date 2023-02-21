@@ -9,6 +9,10 @@
 ///     2. Step through the Vulkan Guide: https://github.com/KhronosGroup/Vulkan-Guide
 ///     3. Read through the Intel tutorial (skip the dynamic library stuff): https://www.intel.com/content/www/us/en/developer/articles/training/api-without-secrets-introduction-to-vulkan-part-1.html
 ///
+/// Certain concepts in Vulkan are not well described in tutorials but are really well described in the specification
+///
+///     1. Execution and Memory Dependencies: https://registry.khronos.org/vulkan/specs/1.0/html/vkspec.html#synchronization-dependencies
+///
 /// We will walk through how to setup a minimal graphics pipeline and render an cube to image on disk.
 /// As we proceed, various core Vulkan concepts will be introduced and their rationale explained.
 ///
@@ -38,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <vulkan/vulkan_core.h>
 
 #ifndef BUILD_TYPE
@@ -253,20 +258,16 @@ int main()
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
     VkAttachmentReference attachmentReference = {
-        0,
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
     VkSubpassDescription subpassDescription = {
-        0,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        0, NULL,
-        0, NULL, NULL,
-        &attachmentReference,
-        0, NULL
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .pDepthStencilAttachment = &attachmentReference,
     };
     VkRenderPass renderPass;
     VkRenderPassCreateInfo renderPassCreateInfo = {
@@ -353,13 +354,14 @@ int main()
 
 
     printf("Creating image view\n");
+    VkImageSubresourceRange imageSubresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 };
     VkImageViewCreateInfo imageViewCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
         .format = imageCreateInfo.format,
         .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-        .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 }
+        .subresourceRange = imageSubresourceRange
     };
     VkImageView imageView;
     if (vkCreateImageView(device, &imageViewCreateInfo, NULL, &imageView) != VK_SUCCESS)
@@ -367,6 +369,57 @@ int main()
         printf("Failed to create image view\n");
         return EXIT_FAILURE;
     }
+
+
+    printf("Creating image pixel read back buffer\n");
+    VkBuffer imageBuffer;
+    VkDeviceSize imageBufferSize = 4 * IMAGE_WIDTH * IMAGE_HEIGHT; // TODO: Check this
+    VkBufferCreateInfo imageBufferCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = imageBufferSize,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queueFamilyIndex
+    };
+    if (vkCreateBuffer(device, &imageBufferCreateInfo, NULL, &imageBuffer) != VK_SUCCESS)
+    {
+        printf("Failed to create image buffer\n");
+        return EXIT_FAILURE;
+    }
+
+    VkMemoryRequirements imageBufferMemoryRequirements;
+    vkGetBufferMemoryRequirements(device, imageBuffer, &imageBufferMemoryRequirements);
+    VkMemoryPropertyFlags imageBufferMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (memoryTypeIndex = 0; memoryTypeIndex < physicalDeviceMemoryProperties.memoryTypeCount; ++memoryTypeIndex) {
+        if (imageBufferMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex)) {
+            if ((physicalDeviceMemoryProperties.memoryTypes[memoryTypeIndex].propertyFlags & imageBufferMemoryProperties) == imageBufferMemoryProperties) {
+                break;
+            }
+        }
+    }
+    if (memoryTypeIndex == physicalDeviceMemoryProperties.memoryTypeCount)
+    {
+        printf("Failed to find suitable physical device memory matching image buffer memory requirements\n");
+        return EXIT_FAILURE;
+    }
+    VkMemoryAllocateInfo imageBufferAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = imageBufferSize,
+        .memoryTypeIndex = memoryTypeIndex
+    };
+    VkDeviceMemory imageBufferMemory;
+    if (vkAllocateMemory(device, &imageBufferAllocateInfo, NULL, &imageBufferMemory) != VK_SUCCESS)
+    {
+        printf("Failed to allocated image buffer memory\n");
+        return EXIT_FAILURE;
+    }
+    if (vkBindBufferMemory(device, imageBuffer, imageBufferMemory, 0) != VK_SUCCESS)
+    {
+        printf("Failed to bind image buffer to image buffer memory\n");
+        return EXIT_FAILURE;
+    }
+
 
     printf("Creating framebuffer\n");
     VkFramebufferCreateInfo framebufferCreateInfo = {
@@ -524,7 +577,6 @@ int main()
         return EXIT_FAILURE;
     }
 
-
     /// Let us record some commands for execution into the allocated command buffer.
     /// This is the first time we are actually going "to do something", everything else up to this point is setup code.
     printf("Recording command buffer\n");
@@ -545,6 +597,37 @@ int main()
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
+
+    VkImageMemoryBarrier imageMemoryBarrier = {
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = queueFamilyIndex,
+        .dstQueueFamilyIndex = queueFamilyIndex,
+        .image = image,
+        .subresourceRange = imageSubresourceRange
+    };
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0,
+                         0, NULL,
+                         0, NULL,
+                         1, &imageMemoryBarrier);
+
+    VkBufferImageCopy imageRegion = {
+        .imageSubresource = {
+            .aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .mipLevel       = imageSubresourceRange.baseMipLevel,
+            .baseArrayLayer = imageSubresourceRange.baseArrayLayer,
+            .layerCount     = imageSubresourceRange.levelCount
+        },
+        .imageExtent = imageExtent
+    };
+    vkCmdCopyImageToBuffer(commandBuffer, image, imageMemoryBarrier.newLayout, imageBuffer, 1, &imageRegion);
+
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
     {
         printf("Failed to end recording of command buffer\n");
@@ -568,8 +651,30 @@ int main()
     printf("Waiting until device is idle\n");
     vkDeviceWaitIdle(device);
 
+    printf("Reading back pixels to host\n");
+    void* mappedImageBufferMemory;
+    void* depthData = malloc(imageBufferCreateInfo.size);
+    vkMapMemory(device, imageBufferMemory, 0, imageBufferCreateInfo.size, 0, &mappedImageBufferMemory);
+    memcpy(depthData, mappedImageBufferMemory, imageBufferCreateInfo.size);
+    vkUnmapMemory(device, imageBufferMemory);
+
+    FILE* outputFile = fopen("out.dat", "w");
+    fwrite(depthData, 1, imageBufferCreateInfo.size, outputFile);
+    fclose(outputFile);
+
+    free(depthData);
+
     /// Finally, tear down the system by destroying objects in reverse order of creation.
     /// Before destruction of each object we will make sure it is not in use anymore.
+    printf("Waiting until device is idle\n");
+    vkDeviceWaitIdle(device);
+
+    printf("Destroying image buffer\n");
+    vkDestroyBuffer(device, imageBuffer, NULL);
+
+    printf("Destroying image buffer memory\n");
+    vkFreeMemory(device, imageBufferMemory, NULL);
+
     printf("Destroying image view\n");
     vkDestroyImageView(device, imageView, NULL);
 
