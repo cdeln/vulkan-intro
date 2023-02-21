@@ -549,6 +549,7 @@ int main()
     /// The commands recorded in a command buffer must be compatible with the family of the queue they are sent over.
     /// The command pool is like a factory for command buffers, they are connected to a specific queue family on our device.
     /// Command pools also let us record command buffers in parallel in separate threads, with one pool per thread.
+    /// Using a command pool also makes allocating new command buffers more efficient that it would be allocating them in isolation.
     printf("Creating command pool\n");
     VkCommandPoolCreateInfo commandPoolCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -601,32 +602,7 @@ int main()
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
-    {
-        printf("Failed to end recording of command buffer\n");
-        return EXIT_FAILURE;
-    }
 
-
-    /// Now it is time to submit the recorded command buffer to the queue and execute the graphics pipeline.
-    printf("Submitting commands to queue\n");
-    VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &commandBuffer
-    };
-    if (vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
-    {
-        printf("Failed to submit command buffer to queue\n");
-        return EXIT_FAILURE;
-    }
-
-    printf("Waiting until device is idle\n");
-    vkDeviceWaitIdle(device);
-
-
-    printf("Reading image to buffer\n");
-    vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
     VkImageMemoryBarrier imageMemoryBarrier = {
         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
@@ -654,9 +630,21 @@ int main()
         },
         .imageExtent = imageExtent
     };
-    vkCmdCopyImageToBuffer(commandBuffer, image, imageMemoryBarrier.newLayout, imageBuffer, 1, &imageRegion);
-    vkEndCommandBuffer(commandBuffer);
+    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, imageBuffer, 1, &imageRegion);
 
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+    {
+        printf("Failed to end recording of command buffer\n");
+        return EXIT_FAILURE;
+    }
+
+    /// Now it is time to submit the recorded command buffer to the queue and execute the graphics pipeline.
+    printf("Submitting commands to queue\n");
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &commandBuffer
+    };
     if (vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS)
     {
         printf("Failed to submit command buffer to queue\n");
@@ -693,8 +681,11 @@ int main()
     fclose(outputFile);
     free(depthData);
 
-    /// Finally, tear down the system by destroying objects in reverse order of creation.
-    /// Before destruction of each object we will make sure it is not in use anymore.
+    /// Finally, tear down the system.
+    /// Before destruction of each object we need to make sure it is not in use anymore, which is easiest by waiting for the queue to become idle.
+    /// All resources that are childs of another resource needs to be released before their parent.
+    /// The easiest way to do this is by destroying objects in reverse order of creation.
+    /// Resources allocated from pools do not have to be manually freed, but we will do it anyways to show how it can be done manually.
     printf("Waiting until device is idle\n");
     vkDeviceWaitIdle(device);
 
