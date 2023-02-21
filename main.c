@@ -49,6 +49,9 @@
 #define BUILD_TYPE ""
 #endif
 
+#define MAX_PHYSICAL_DEVICE_COUNT 4
+#define MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES 8
+
 #define VERTEX_SHADER_SOURCE_PATH "out/" BUILD_TYPE "/shader.vert.spv"
 #define IMAGE_WIDTH 20
 #define IMAGE_HEIGHT 20
@@ -73,6 +76,10 @@ resultString(VkResult code)
 int main()
 {
     const uint32_t imagePixelCount = IMAGE_WIDTH * IMAGE_HEIGHT;
+
+    /// Many functions in Vulkan return a resulting status code.
+    /// Something we want to put that in a variable and do various checks. For convenience we create one variable for that usage.
+    VkResult code;
 
     /// First step is to create an instance object.
     /// This is where we specify global stuff such as info about our application, which validation layers and extensions that we want to load.
@@ -161,17 +168,17 @@ int main()
     ///     1. Enumerate all physical devices
     ///     2. Query each physical device for properties, check the device type and select the first suitable match.
     printf("Enumerating physical devices\n");
-    uint32_t physicalDeviceCount;
-    if (vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL) != VK_SUCCESS)
+    uint32_t physicalDeviceCount = MAX_PHYSICAL_DEVICE_COUNT;
+    VkPhysicalDevice physicalDevices[MAX_PHYSICAL_DEVICE_COUNT];
+    if ((code = vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices)) != VK_SUCCESS)
     {
-        printf("Failed to enumerate physical devices\n");
-        return EXIT_FAILURE;
-    }
-    VkPhysicalDevice physicalDevices[physicalDeviceCount];
-    if (vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices) != VK_SUCCESS)
-    {
-        printf("Failed to enumerate physical devices\n");
-        return EXIT_FAILURE;
+        if (code == VK_INCOMPLETE) {
+            printf("There are more than MAX_PHYSICAL_DEVICE_COUNT physical devices available, consider recompiling with a different value\n");
+        }
+        else {
+            printf("Failed to enumerate physical devices, code: %d\n", code);
+            return EXIT_FAILURE;
+        }
     }
     printf("%d physical devices available\n", physicalDeviceCount);
     if (physicalDeviceCount == 0)
@@ -196,9 +203,8 @@ int main()
             continue;
         }
 
-        uint32_t queueFamiliesCount;
-        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamiliesCount, NULL);
-        VkQueueFamilyProperties queueFamilyProperties[queueFamiliesCount];
+        VkQueueFamilyProperties queueFamilyProperties[MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES];
+        uint32_t queueFamiliesCount = MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES;
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamiliesCount, queueFamilyProperties);
         for (queueFamilyIndex = 0; queueFamilyIndex < queueFamiliesCount ; ++queueFamilyIndex) {
             VkQueueFlags flags = queueFamilyProperties[queueFamilyIndex].queueFlags;
@@ -255,7 +261,7 @@ int main()
     VkAttachmentDescription attachmentDescription = {
         .flags = 0,
         .format = VK_FORMAT_D24_UNORM_S8_UINT,
-        .samples = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -310,7 +316,6 @@ int main()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
     VkImage image;
-    VkResult code;
     if ((code = vkCreateImage(device, &imageCreateInfo, NULL, &image)) != VK_SUCCESS)
     {
         printf("Failed to create image: %s\n", resultString(code));
@@ -449,9 +454,9 @@ int main()
     }
     FILE* vertexShaderFile = fopen(VERTEX_SHADER_SOURCE_PATH, "r");
     fseek(vertexShaderFile, 0, SEEK_END);
-    long vertexShaderCodeSize = ftell(vertexShaderFile);
+    size_t vertexShaderCodeSize = ftell(vertexShaderFile);
     rewind(vertexShaderFile);
-    uint32_t* vertexShaderCode = malloc(1 + 4 * (vertexShaderCodeSize / 4)); // multiple of 4 bytes
+    uint32_t* vertexShaderCode = (uint32_t*) malloc(1 + 4 * (vertexShaderCodeSize / 4)); // multiple of 4 bytes
     fread(vertexShaderCode, 1, vertexShaderCodeSize, vertexShaderFile);
     VkShaderModuleCreateInfo vertexShaderModuleCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -656,12 +661,12 @@ int main()
 
     printf("Reading back pixels to host\n");
     void* mappedImageBufferMemory;
-    uint32_t* imageData = malloc(imageBufferCreateInfo.size);
+    uint32_t* imageData = (uint32_t*) malloc(imageBufferCreateInfo.size);
     vkMapMemory(device, imageBufferMemory, 0, imageBufferCreateInfo.size, 0, &mappedImageBufferMemory);
     memcpy(imageData, mappedImageBufferMemory, imageBufferCreateInfo.size);
     vkUnmapMemory(device, imageBufferMemory);
 
-    float* depthData = malloc(imagePixelCount * sizeof(float));
+    float* depthData = (float*) malloc(imagePixelCount * sizeof(float));
     for (uint32_t i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; ++i) {
         uint32_t unormDepth = imageData[i] >> 1;
         depthData[i] = ((float) unormDepth) / ((1 << 23) - 1);
