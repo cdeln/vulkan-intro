@@ -169,6 +169,11 @@ int main()
     VkResult code;
 
 
+    ////////////////////////////////////
+    ////////// PART 1 | Setup //////////
+    ////////////////////////////////////
+
+
     /// First step is to create an instance object.
     /// This is where we specify global stuff such as info about our application, which validation layers and extensions that we want to load.
     /// The instance object is an opaque handle, which will be used to get physical devices with later on.
@@ -302,7 +307,8 @@ int main()
         VkQueueFamilyProperties queueFamilyProperties[MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES];
         uint32_t queueFamiliesCount = MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES;
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamiliesCount, queueFamilyProperties);
-        for (queueFamilyIndex = 0; queueFamilyIndex < queueFamiliesCount ; ++queueFamilyIndex) {
+        for (queueFamilyIndex = 0; queueFamilyIndex < queueFamiliesCount ; ++queueFamilyIndex)
+        {
             VkQueueFlags flags = queueFamilyProperties[queueFamilyIndex].queueFlags;
             if ((flags & VK_QUEUE_GRAPHICS_BIT) && (flags & VK_QUEUE_TRANSFER_BIT)) {
                 break;
@@ -352,7 +358,11 @@ int main()
     vkGetDeviceQueue(device, queueFamilyIndex, 0, &queue);
 
 
-    /// That is the core setup code that probably needs to be done for all Vulkan programs.
+    ////////////////////////////////////
+    ////////// PART 2 | Resources //////
+    ////////////////////////////////////
+
+
     /// Next step is to allocate resources for the image we will render to, as well as a pixel readback buffer.
     /// Vulkan distinguish images, buffers, memory and views into those from each other.
     /// In Vulkan, memory can be allocated on different physical devices, on different heaps of different memory types.
@@ -374,6 +384,11 @@ int main()
     /// Having the rendered content in a buffer allows us to memory map it and copy back to the host.
 
     /// Create the image for storing depth.
+    /// We create an image for storing 24 bit depth and a 8 bit stencil component.
+    /// We specify that the image will be used as a depth/stencil attachment and as a source for a transfer operation.
+    /// We specify that the image will not be shared between different queue families by setting share mode to VK_SHARING_MODE_EXCLUSIVE.
+    /// We specify the initial layout as undefined. We can also specify it as pre-initialized, but then we need to initialize it manually.
+    /// Other settings are boilerplate for now.
     /// The image needs separately allocated memory.
     printf("Creating image\n");
     VkExtent3D imageExtent = {
@@ -409,16 +424,12 @@ int main()
     /// The memory types that the image can access is provided by a bitmask.
     /// If the bit at position `i` is set means that memory type `i` is compatible with the image memory requirements.
     /// This leads to some bit-shifting logic beneath.
-    /// We require that the image memory have the HOST_VISIBLE and HOST_COHERENT bits set.
-    /// HOST_VISIBLE means that the memory can be mapped to host memory
-    /// HOST_COHERENT means that device writes to the memory will be visible to the host without extra flushing commands.
-    /// Note the slight inconsistency in the naming conventions here.
-    /// Memory visibility is a concept in Vulkan related to synchronization of commands, which is what the HOST_COHERENT bit addresses.
+    /// We require that the image memory have the DEVICE_LOCAL bit set, which means that accesses to the image will be made on the device.
     VkMemoryRequirements imageMemoryRequirements;
     vkGetImageMemoryRequirements(device, image, &imageMemoryRequirements);
     VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &physicalDeviceMemoryProperties);
-    VkMemoryPropertyFlags imageMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    VkMemoryPropertyFlags imageMemoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     uint32_t memoryTypeIndex;
     for (memoryTypeIndex = 0; memoryTypeIndex < physicalDeviceMemoryProperties.memoryTypeCount; ++memoryTypeIndex) {
         if (imageMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex)) {
@@ -489,34 +500,42 @@ int main()
     /// Now we have defined the image, memory and view for the render target.
     /// We also need to create a buffer which we can read back the rendered data to the host with.
     /// The procedure for allocating a suitable memory for the buffer is similar to the one for the image.
+    /// We require that the buffer memory have the HOST_VISIBLE and HOST_COHERENT bits set.
+    /// HOST_VISIBLE means that the memory can be mapped to host memory
+    /// HOST_COHERENT means that device writes to the memory will be visible to the host without extra flushing commands.
+    /// Note the slight inconsistency in the naming conventions here.
+    /// Memory visibility is a concept in Vulkan related to synchronization of commands, which is what the HOST_COHERENT bit addresses.
+    /// Since we know that the memory layout will be linear for a buffer we can also calculate how much memory we need to allocate from the image format and size.
+    /// We will also specify that the buffer will be used as a destination of a transfer operation.
     printf("Creating image pixel read back buffer\n");
-    VkBuffer imageBuffer;
-    VkDeviceSize imageBufferSize = formatSize(imageCreateInfo.format) * IMAGE_WIDTH * IMAGE_HEIGHT;
-    if (imageBufferSize == 0)
+    VkBuffer pixelReadbackBuffer;
+    VkDeviceSize pixelReadbackBufferSize = formatSize(imageCreateInfo.format) * IMAGE_WIDTH * IMAGE_HEIGHT;
+    if (pixelReadbackBufferSize == 0)
     {
         printf("Failed to estimate byte size of image format: %s\n", formatString(imageCreateInfo.format));
         return EXIT_FAILURE;
     }
-    VkBufferCreateInfo imageBufferCreateInfo = {
+    VkBufferCreateInfo pixelReadbackBufferCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = imageBufferSize,
+        .size = pixelReadbackBufferSize,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 1,
         .pQueueFamilyIndices = &queueFamilyIndex
     };
-    if (vkCreateBuffer(device, &imageBufferCreateInfo, NULL, &imageBuffer) != VK_SUCCESS)
+    if (vkCreateBuffer(device, &pixelReadbackBufferCreateInfo, NULL, &pixelReadbackBuffer) != VK_SUCCESS)
     {
-        printf("Failed to create image buffer\n");
+        printf("Failed to create pixel readback buffer\n");
         return EXIT_FAILURE;
     }
 
-    VkMemoryRequirements imageBufferMemoryRequirements;
-    vkGetBufferMemoryRequirements(device, imageBuffer, &imageBufferMemoryRequirements);
-    VkMemoryPropertyFlags imageBufferMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    for (memoryTypeIndex = 0; memoryTypeIndex < physicalDeviceMemoryProperties.memoryTypeCount; ++memoryTypeIndex) {
-        if (imageBufferMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex)) {
-            if ((physicalDeviceMemoryProperties.memoryTypes[memoryTypeIndex].propertyFlags & imageBufferMemoryProperties) == imageBufferMemoryProperties) {
+    VkMemoryRequirements pixelReadbackBufferMemoryRequirements;
+    vkGetBufferMemoryRequirements(device, pixelReadbackBuffer, &pixelReadbackBufferMemoryRequirements);
+    VkMemoryPropertyFlags pixelReadbackBufferMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (memoryTypeIndex = 0; memoryTypeIndex < physicalDeviceMemoryProperties.memoryTypeCount; ++memoryTypeIndex)
+    {
+        if (pixelReadbackBufferMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex)) {
+            if ((physicalDeviceMemoryProperties.memoryTypes[memoryTypeIndex].propertyFlags & pixelReadbackBufferMemoryProperties) == pixelReadbackBufferMemoryProperties) {
                 break;
             }
         }
@@ -528,36 +547,48 @@ int main()
     }
 
     printf("Allocating image buffer memory\n");
-    VkMemoryAllocateInfo imageBufferAllocateInfo = {
+    VkMemoryAllocateInfo pixelReadbackBufferAllocateInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = imageBufferSize,
+        .allocationSize = pixelReadbackBufferSize,
         .memoryTypeIndex = memoryTypeIndex
     };
-    VkDeviceMemory imageBufferMemory;
-    if (vkAllocateMemory(device, &imageBufferAllocateInfo, NULL, &imageBufferMemory) != VK_SUCCESS)
+    VkDeviceMemory pixelReadbackBufferMemory;
+    if (vkAllocateMemory(device, &pixelReadbackBufferAllocateInfo, NULL, &pixelReadbackBufferMemory) != VK_SUCCESS)
     {
         printf("Failed to allocated image buffer memory\n");
         return EXIT_FAILURE;
     }
 
     printf("Binding image buffer to image buffer memory\n");
-    if (vkBindBufferMemory(device, imageBuffer, imageBufferMemory, 0) != VK_SUCCESS)
+    if (vkBindBufferMemory(device, pixelReadbackBuffer, pixelReadbackBufferMemory, 0) != VK_SUCCESS)
     {
         printf("Failed to bind image buffer to image buffer memory\n");
         return EXIT_FAILURE;
     }
 
 
+    ////////////////////////////////////////////
+    ////////// PART 3 | Graphics Pipeline //////
+    ////////////////////////////////////////////
 
-    /// In order to render something, we need to define a render pass, a framebuffer, shader modules and a graphics pipeline.
-    /// A render pass describes how stuff will be rendered.
-    /// A framebuffer describes which images the render pass will render into.
-    /// A graphics pipeline put all this together.
+
+    /// In order to render something, we need to define a graphics pipeline.
+    /// A graphics pipeline needs a render pass, a framebuffer, loading of shader code for the programmable stages,
+    /// and configuration of the fixed (assembly, rasterization, etc.) stages.
+    ///
+    /// Let us start with the render pass.
+    /// The render pass needs to know about the attachment it will render to, i.e. the render targets.
+    /// When describing the attachment we configure Vulkan how the render pass load and store operations will behave.
+    /// We also specify the initial and final layouts of the render target. A render pass automatically perform image layout transitions (nice!).
+    /// Note some code duplication here regarding format and samples. Can't that be deduced from the image it will render into?
+    /// The render pass is lightly coupled with the actual image it will render into, the framebuffer will connect the dots later on.
+    /// The specs states that these needs to match, so specifying anything different from those in the image is an error.
+    /// Again, Vulkan puts the burden on us to make sure that this is the case. Validation layers also detects this type of errors.
     printf("Creating render pass\n");
     VkAttachmentDescription attachmentDescription = {
         .flags = 0,
-        .format = VK_FORMAT_D24_UNORM_S8_UINT,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .format = imageCreateInfo.format,
+        .samples = imageCreateInfo.samples,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -565,13 +596,18 @@ int main()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
+
+    /// A render pass is divided into subpasses. We only need one subpass for now.
+    /// We need to tell the subpass what input and output attachment it has, which are referenced to the attachments described by the parent render pass.
+    /// We only have one output attachment (index 0).
+    /// The pipeline bind point must be set to graphics.
     VkAttachmentReference attachmentReference = {
         .attachment = 0,
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
     VkSubpassDescription subpassDescription = {
         .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .pDepthStencilAttachment = &attachmentReference,
+        .pDepthStencilAttachment = &attachmentReference
     };
     VkRenderPass renderPass;
     VkRenderPassCreateInfo renderPassCreateInfo = {
@@ -588,6 +624,10 @@ int main()
     }
 
 
+    /// Let us create the framebuffer.
+    /// The framebuffer connects image views as attachments for the render pass.
+    /// The framebuffer shape parameters (width, height) need to match up with those of the image view.
+    /// The layer parameter should be 1 expect in advanced use cases.
     printf("Creating framebuffer\n");
     VkFramebufferCreateInfo framebufferCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
@@ -606,6 +646,10 @@ int main()
     }
 
 
+    /// The graphics pipeline needs to have at least a vertex shader in order to draw something.
+    /// In Vulkan we load pre-compiled SPIR-V files. This allows different shading languages to be used together with Vulkan.
+    /// On thing I noted when reading the specs is that the shader code needs to be a multiple of 4 bytes (it is defined as an array of 32 bit integers).
+    /// Most tutorials do not take this up, but unless you make sure to allocate a multiple of 4 bytes I think that a Vulkan implementation might segfault.
     printf("Creating vertex shader module from %s\n", VERTEX_SHADER_SOURCE_PATH);
     if (access(VERTEX_SHADER_SOURCE_PATH, F_OK))
     {
@@ -616,7 +660,7 @@ int main()
     fseek(vertexShaderFile, 0, SEEK_END);
     size_t vertexShaderCodeSize = ftell(vertexShaderFile);
     rewind(vertexShaderFile);
-    uint32_t* vertexShaderCode = (uint32_t*) malloc(1 + 4 * (vertexShaderCodeSize / 4)); // multiple of 4 bytes
+    uint32_t* vertexShaderCode = (uint32_t*) malloc(1 + 4 * (vertexShaderCodeSize / 4));
     fread(vertexShaderCode, 1, vertexShaderCodeSize, vertexShaderFile);
     VkShaderModuleCreateInfo vertexShaderModuleCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -632,6 +676,10 @@ int main()
     }
     free(vertexShaderCode);
 
+
+    /// Now we are ready to setup the graphics pipeline.
+    /// We do this by describing the pipeline programmable (shader) stages, the pipeline fixed (assembly, rasterization, etc.) stages,
+    /// the viewport, and the render pass to use.
     printf("Creating graphics pipeline\n");
     VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfos[] = {
         {
@@ -693,7 +741,6 @@ int main()
         .pInputAssemblyState = &inputAssemblyStateCreateInfo,
         .pViewportState = &viewportStateCreateInfo,
         .pRasterizationState = &pipelineRasterizationStateCreateInfo,
-        .pMultisampleState = NULL,
         .pDepthStencilState = &pipelineDepthStencilStateCreateInfo,
         .layout = pipelineLayout,
         .renderPass = renderPass
@@ -706,6 +753,10 @@ int main()
     }
 
 
+    ////////////////////////////////////////////
+    ////////// STEP 4 | Command buffers ////////
+    ////////////////////////////////////////////
+
     /// Vulkan communicate with the device using commands send over the queue.
     /// It is inefficient to send one command at a time, so we will record the commands we want to perform in a command buffer and send it over once.
     /// Before we can create a command buffer, we need to create a command pool.
@@ -713,6 +764,8 @@ int main()
     /// The command pool is like a factory for command buffers, they are connected to a specific queue family on our device.
     /// Command pools also let us record command buffers in parallel in separate threads, with one pool per thread.
     /// Using a command pool also makes allocating new command buffers more efficient that it would be allocating them in isolation.
+    /// We create the command pool with the VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, which will make sure that command buffers alloacted from the pool
+    /// are put into a good initial state if they are re-used.
     printf("Creating command pool\n");
     VkCommandPoolCreateInfo commandPoolCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -727,7 +780,7 @@ int main()
     }
 
     /// With a command pool we can create a command buffer from it.
-    /// To create the command buffer we specify a command pool to create a level.
+    /// To create the command buffer we specify a command pool at a certain level.
     /// There are two command buffer levels in Vulkan: primary and secondary.
     /// Primary level command buffers can be submitted to queues, while secondary are called from primary commands (advanced usage).
     /// When the command buffer is allocated, it is put into "initial state".
@@ -750,11 +803,11 @@ int main()
     /// This is the first time we are actually going "to do something", everything else up to this point is setup code.
     /// This will put the command buffer into "recording state".
     /// There exist several families of commands that can be recorded in a command buffer: action, state, synchronization and launch commands.
-    /// TODO: Set optimal flags
+    /// For action commands we will begin a render pass, bind the graphics pipeline and draw our triangle.
+    /// For synchronization we will make an image layout transition so that we can transfer it to our pixel readback buffer. Details come later.
     printf("Recording command buffer\n");
     VkCommandBufferBeginInfo commandBufferBeginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
     };
     vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
     VkClearValue clearValue = { .depthStencil = {1.0f, 0} };
@@ -771,14 +824,16 @@ int main()
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
 
-    /// Efter the render pass we want change the depth buffer image layout.
+    /// Efter the render pass we want change the image layout from the optimal layout for depth/stencil attachment to an optimal as a source for transfer.
     /// We do that using an image memory barrier to synchronize access before and after the layout transition.
-    /// Note that this can also be expressed using render subpass dependencies.
-    /// This is probably more efficient if we are using more than one subpass.
+    /// The memory barrier will modify the layout of the image in-place.
+    /// Note that this can also be expressed using render subpass dependencies, which is probably more efficient if we are using more than one subpass.
+    /// We specify the "access scope" before the layout transition as those operations that writes to the depth/stencil attachment.
+    /// We specify the access scope after the transition as those operations that do a transfer read.
+    /// An access scope means what kind of memory operations will be made before and after a synchronization command.
+    /// To really understand access scopes I recommend reading the chapter regarding synchronization in the spec.
     VkImageMemoryBarrier imageMemoryBarrier = {
         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        // .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-        // .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -788,9 +843,11 @@ int main()
         .image = image,
         .subresourceRange = imageSubresourceRange
     };
+    /// We also need to specify a "synchronization scope", which means which type of operations need to happen before and happen after the barrier.
+    /// We specify the VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT as the prior scope (i.e. the stage that access the depth/stencil buffer)
+    /// and the VK_PIPELINE_STAGE_TRANSFER_BIT as the posterior scope (i.e. the transfer command we want to do after the barrier).
     /// Can also use VkDependencyInfo + vkCmdPipelineBarrier2
-    /// We specify that the execution and memory dependencies are "framebuffer local" by setting the VK_DEPENDENCY_BY_REGION_BIT.
-    /// This allows Vulkan to perform more aggressive optimizations.
+    /// We specify that the execution and memory dependencies are "framebuffer local" by setting the VK_DEPENDENCY_BY_REGION_BIT, which allows for some aggressive optimizations.
     vkCmdPipelineBarrier(commandBuffer,
                          VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -798,6 +855,13 @@ int main()
                          0, NULL,
                          0, NULL,
                          1, &imageMemoryBarrier);
+
+    /// Now the image layout is optimized for transfer and we copy it to the pixel readback buffer.
+    /// We can only copy one aspect of an image at time.
+    /// Reading the specs on VkBufferImageCopy (https://devdocs.io/vulkan/index#VkBufferImageCopy) tells us that
+    /// the depth/stencil format we have choosen can be treated as packed into 32-bit texels.
+    /// Hence, what we actually copy is both the depth and stencil aspects.
+    /// Note that if we defined the format as VK_FORMAT_D32_SFLOAT_S8_UINT, then the stencil part would be dropped.
     VkBufferImageCopy imageRegion = {
         .imageSubresource = {
             .aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -807,7 +871,7 @@ int main()
         },
         .imageExtent = imageExtent
     };
-    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, imageBuffer, 1, &imageRegion);
+    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, pixelReadbackBuffer, 1, &imageRegion);
 
     /// Finish the recoding of the command buffer.
     /// This will put the command buffer into "executable state", that is, we can submit it for execution.
@@ -850,23 +914,49 @@ int main()
         printf("Waiting until fence is signaled, current status: %s\n", resultString(code));
     }
 
-    printf("Command execution completed! Reading back pixels to host\n");
-    void* mappedImageBufferMemory;
-    uint32_t* imageData = (uint32_t*) malloc(imageBufferCreateInfo.size);
-    vkMapMemory(device, imageBufferMemory, 0, imageBufferCreateInfo.size, 0, &mappedImageBufferMemory);
-    memcpy(imageData, mappedImageBufferMemory, imageBufferCreateInfo.size);
-    vkUnmapMemory(device, imageBufferMemory);
+    printf("Command execution completed!");
 
+    ///////////////////////////////////////////
+    ////////// STEP 5 | Pixel readback ////////
+    ///////////////////////////////////////////
+
+    /// The command has finished executing and we are ready to read back the pixels.
+    /// We do this by mapping the device memory to host, which is possible since the buffer memory was created with the VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.
+    /// We also know that the data is available since the VK_MEMORY_PROPERTY_HOST_COHERENT_BIT was set, so no explicit flushing of memory caches are needed.
+    printf("Reading back pixels to host\n");
+    void* mappedImageBufferMemory;
+    uint32_t* imageData = (uint32_t*) malloc(pixelReadbackBufferCreateInfo.size);
+    vkMapMemory(device, pixelReadbackBufferMemory, 0, pixelReadbackBufferCreateInfo.size, 0, &mappedImageBufferMemory);
+    memcpy(imageData, mappedImageBufferMemory, pixelReadbackBufferCreateInfo.size);
+    vkUnmapMemory(device, pixelReadbackBufferMemory);
+
+    /// The pixels are now read back from the pixel read back buffer to host memory.
+    /// Reading the spec we can read that copying the depth aspect of an image with VK_FORMAT_D24_UNORM_S8_UINT
+    /// will give us texels on the format VK_FORMAT_X8_D24_UNFORM_PACK32.
+    /// Further reading up on that format in the spec (https://registry.khronos.org/vulkan/specs/1.3/html/chap34.html#formats-definition)
+    /// tells us that
+    ///
+    ///     1. Formats are layed out in memory in component order
+    ///     2. Multi-byte components are layed out in memory according to host endianess
+    ///
+    /// This means that the most significant byte is unspecified and the 3 least significant bytes of the 32-bit integer contains the depth component.
+    /// Let us extract the depth component from that.
+    /// D24_UNORM means 24-bit depth in unsigned normalized fixed-point format.
+    /// We extract the 3 least significant bits by bit-wise anding with 0xFFFFFF.
+    /// To convert from unorm to float we refer to the spec: https://registry.khronos.org/vulkan/specs/1.3/html/chap3.html#fundamentals-fixedconv
     float* depthData = (float*) malloc(imagePixelCount * sizeof(float));
     for (uint32_t i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; ++i) {
-        uint32_t unormDepth = imageData[i] >> 1;
-        depthData[i] = ((float) unormDepth) / ((1 << 23) - 1);
-        if (unormDepth  == ((1<<23) - 1)) {
+        uint32_t unormDepth = 0xFFFFFF & imageData[i];
+        depthData[i] = ((float) unormDepth) / 0xFFFFFF;
+        /// For visualization purposes we set the depth data to 0 if has not been written to (as indicated by maximum depth value).
+        if (unormDepth  == 0xFFFFFF) {
             depthData[i] = 0;
         }
     }
     free(imageData);
 
+    /// Write the depth image to output file, formatted to 4 decimals.
+    /// Opening out.dat you should see a triangle filled with 0.1337 values.
     FILE* outputFile = fopen("out.dat", "w");
     for (uint32_t i = 0; i < IMAGE_WIDTH; ++i) {
         for (uint32_t j = 0; j < IMAGE_HEIGHT; ++j) {
@@ -876,6 +966,11 @@ int main()
     }
     fclose(outputFile);
     free(depthData);
+
+
+    ////////////////////////////////////
+    ////////// STEP 6 | Cleanup ////////
+    ////////////////////////////////////
 
     /// Finally, tear down the system.
     /// Before destruction of each object we need to make sure it is not in use anymore, which is easiest by waiting for the queue to become idle.
@@ -889,10 +984,10 @@ int main()
     vkDestroyFence(device, fence, NULL);
 
     printf("Destroying image buffer\n");
-    vkDestroyBuffer(device, imageBuffer, NULL);
+    vkDestroyBuffer(device, pixelReadbackBuffer, NULL);
 
     printf("Destroying image buffer memory\n");
-    vkFreeMemory(device, imageBufferMemory, NULL);
+    vkFreeMemory(device, pixelReadbackBufferMemory, NULL);
 
     printf("Destroying image view\n");
     vkDestroyImageView(device, imageView, NULL);
