@@ -612,7 +612,11 @@ int main()
     size_t vertexShaderCodeSize = ftell(vertexShaderFile);
     rewind(vertexShaderFile);
     uint32_t* vertexShaderCode = (uint32_t*) malloc(1 + 4 * (vertexShaderCodeSize / 4));
-    fread(vertexShaderCode, 1, vertexShaderCodeSize, vertexShaderFile);
+    if (fread(vertexShaderCode, 1, vertexShaderCodeSize, vertexShaderFile) != vertexShaderCodeSize)
+    {
+        printf("Failed to read shader code\n");
+        return EXIT_FAILURE;
+    }
     VkShaderModuleCreateInfo vertexShaderModuleCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = vertexShaderCodeSize,
@@ -909,8 +913,8 @@ int main()
     /// Write the depth image to output file, formatted to 4 decimals.
     /// Opening out.dat you should see a triangle filled with 0.1337 values.
     FILE* outputFile = fopen("out.dat", "w");
-    for (uint32_t i = 0; i < IMAGE_WIDTH; ++i) {
-        for (uint32_t j = 0; j < IMAGE_HEIGHT; ++j) {
+    for (uint32_t i = 0; i < IMAGE_HEIGHT; ++i) {
+        for (uint32_t j = 0; j < IMAGE_WIDTH; ++j) {
             fprintf(outputFile, "%.4f ", depthData[IMAGE_WIDTH * i + j]);
         }
         fprintf(outputFile, "\n");
