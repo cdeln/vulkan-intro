@@ -16,7 +16,4 @@ fi
 
 prefix=out/$mode
 
-cmake -S . -B $prefix \
-    -DCMAKE_BUILD_TYPE=$mode \
-    -DCMAKE_CXX_COMPILER=clang++ \
-    "${@:2}"
+cmake -S . -B $prefix -DCMAKE_BUILD_TYPE=$mode "${@:2}"

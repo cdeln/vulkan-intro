@@ -1,7 +1,7 @@
 /// This file will walk through how to setup a minimal graphics pipeline and render the depth
 /// of a triangle to image on disk. The goal is to as quickly as possible see some results.
 /// Despite the warnings provided at the start of the classic tutorials about being patient,
-/// it feel almost ridiculous for a beginner how much code is needed for setup.
+/// it can feel overwhelming for a beginner how much code is needed for a simple setup.
 ///
 /// We will not setup presentation to screen, which is one of the most demanding things to
 /// understand for a beginner. We will not need any extensions either, only the core API.
@@ -23,21 +23,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <vulkan/vulkan_core.h>
 
 
 /// We want to enable/disable certain features depending on the typical CMake
 /// build types (Debug/Release).
 /// For example, validation layers should only be enabled in Debug.
 #ifndef BUILD_TYPE
-#define BUILD_TYPE ""
+#define BUILD_TYPE "Debug"
 #endif
 
 
 /// Define some user configurable compile time constants.
 /// MAX_PHYSICAL_DEVICE_COUNT and MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES allows us
 /// to use less dynamic allocation later on.
+
+#ifndef MAX_PHYSICAL_DEVICE_COUNT
 #define MAX_PHYSICAL_DEVICE_COUNT 4
+#endif
+
 #define MAX_PHYSICAL_DEVICE_QUEUE_FAMILIES 8
 #define VERTEX_SHADER_SOURCE_PATH "out/" BUILD_TYPE "/shader.vert.spv"
 #define IMAGE_WIDTH 20
@@ -235,15 +238,15 @@ int main()
     ///     2. Query each physical device for properties
     ///     3. Check the device type and select the first suitable match
     ///
-    printf("Enumerating physical devices\n");
+    printf("Enumerating physical devices (maximum %d)\n", MAX_PHYSICAL_DEVICE_COUNT);
     uint32_t physicalDeviceCount = MAX_PHYSICAL_DEVICE_COUNT;
     VkPhysicalDevice physicalDevices[MAX_PHYSICAL_DEVICE_COUNT];
     code = vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
     if (code != VK_SUCCESS)
     {
         if (code == VK_INCOMPLETE) {
-            printf("There are more than MAX_PHYSICAL_DEVICE_COUNT physical devices available,\
-                    consider recompiling with a different value\n");
+            printf("There are more than MAX_PHYSICAL_DEVICE_COUNT physical devices available,"
+                   " consider recompiling with a different value\n");
         }
         else {
             printf("Failed to enumerate physical devices, code: %d\n", code);
@@ -342,23 +345,22 @@ int main()
 
 
     /// Next step is to allocate resources for the image we will render to, as well as a pixel
-    /// readback buffer. Vulkan distinguish images, buffers, memory and views into those from
-    /// each other. In Vulkan, memory can be allocated on different physical devices, on
-    /// different heaps of different memory types. The memory type becomes important when you
-    /// want to transfer data between device and host, for example.
-    /// You will never (to my knowledge) operate directly on memory, but through buffers and
-    /// images or other memory like objects.
+    /// readback buffer. Vulkan distinguish images, buffers, memory and views.
+    /// In Vulkan, memory can be allocated on different physical devices, on different heaps
+    /// of different memory types. The memory type becomes important when you want to transfer
+    /// data between device and host, for example. You will never (to my knowledge) operate
+    /// directly on memory, but through buffers and images or other memory like objects.
     /// Buffers are simple memory objects. They add the functionality of belonging to a queue,
-    /// having a usage flag etc. Several buffers can share memory (they can overlap, for
-    /// example), which also should highlight why it is good to differ between raw memory and
-    /// the buffer that lies on top of it.
+    /// having a usage flag etc. Several buffers can share memory, they can even overlap,
+    /// which also should highlight why it is good to differ between raw memory and the buffer
+    /// that lies on top of it.
     /// Images are more advanced than buffers. While buffers represent linear memory, images
     /// support several features optimized for graphics such as formats, mipmaps, layers, and
     /// multisampling. Images can also be (and usually are) tiled, which makes them more
     /// efficient than buffers for image like access patterns.
     /// Images also have something called a layout which specifies what kind of operation they
     /// are optimized for. You want to specify a certain layout when rendering, and then
-    /// transition it to another before transferring.
+    /// transition it to another layout before transferring.
     /// Finally there are views, which specify a subset of the underlying resource to access.
     /// This is what eventually will go into the framebuffer.
     ///
@@ -408,9 +410,9 @@ int main()
     /// Every image can be queried for its memory requirements, which we then can compare with
     /// the memory properties provided by the physical device.
     /// We created the image using the device, so it knows what memory types are available.
-    /// The memory types that the image can access is provided by a bitmask.
-    /// If the bit at position `i` is set means that memory type `i` is compatible with the
-    /// image memory requirements. This leads to some bit-shifting logic beneath.
+    /// The memory types that the image can use is provided by a bitmask.
+    /// If the bit at position `i` is set, then memory type `i` is compatible with the image
+    /// memory requirements. This leads to some bit-shifting logic beneath.
     /// We require that the image memory have the DEVICE_LOCAL bit set, which means that
     /// accesses to the image will be made on the device (which is optimal for rendering).
     VkMemoryRequirements imageMemoryRequirements;
@@ -458,8 +460,8 @@ int main()
 
     /// We create an image view by specifying which mip level and array layer of the image
     /// that we want to access. We also specify which "aspects" of an image we want to access.
-    /// In our case, we are want to view both the depth and the stencil part of the image,
-    /// so we or those to apsect together.
+    /// In our case, we want to view both the depth and the stencil part of the image, so we
+    /// "or" those to apsects together.
     /// Note that we need to specify that we want a 2D image view again.
     /// The component mapping can be used to "swizzle" around the components of each pixel.
     /// Usually this is assigned a 4-tuple of "swizzle identity".
@@ -496,7 +498,7 @@ int main()
     /// We also need a buffer which we can read back the rendered data to the host with.
     /// The procedure for allocating a suitable memory for the buffer is similar to images.
     /// We require that the buffer memory have the HOST_VISIBLE and HOST_COHERENT bits set.
-    /// HOST_VISIBLE means that the memory can be mapped to host memory
+    /// HOST_VISIBLE means that the memory can be mapped to host memory.
     /// HOST_COHERENT means that device writes to the memory will be visible to the host
     /// without extra flushing commands.
     /// Note the slight inconsistency in the naming conventions here. Memory visibility is a
@@ -523,7 +525,8 @@ int main()
         .queueFamilyIndexCount = 1,
         .pQueueFamilyIndices = &queueFamilyIndex
     };
-    if (vkCreateBuffer(device, &pixelReadbackBufferCreateInfo, NULL, &pixelReadbackBuffer) != VK_SUCCESS)
+    code = vkCreateBuffer(device, &pixelReadbackBufferCreateInfo, NULL, &pixelReadbackBuffer);
+    if (code != VK_SUCCESS)
     {
         printf("Failed to create pixel readback buffer\n");
         return EXIT_FAILURE;
@@ -540,8 +543,9 @@ int main()
         if (pixelReadbackBufferMemoryRequirements.memoryTypeBits & (1 << memoryTypeIndex))
         {
             VkMemoryType memoryType = deviceMemoryProperties.memoryTypes[memoryTypeIndex];
-            VkMemoryPropertyFlags matchingProperties =
-                (memoryType.propertyFlags & pixelReadbackBufferMemoryProperties);
+            VkMemoryPropertyFlags matchingProperties = (
+                memoryType.propertyFlags & pixelReadbackBufferMemoryProperties
+            );
             if (matchingProperties == pixelReadbackBufferMemoryProperties) {
                 break;
             }
@@ -595,11 +599,11 @@ int main()
     /// render target. A render pass automatically perform image layout transitions (nice!).
     ///
     /// Note some code duplication here regarding format and samples. Can't that be deduced
-    /// from the image it will render into? The render pass is lightly coupled with the actual
+    /// from the image it will render into? The render pass is loosely coupled with the actual
     /// image it will render into, the framebuffer will connect the dots later on.
     /// The specs states that these needs to match, so specifying anything different from
     /// those in the image is an error. Again, Vulkan puts the burden on us to make sure that
-    /// this is the case. Validation layers also detects this type of errors.
+    /// this is the case. Luckily, validation layers also detects this type of errors for us.
     printf("Creating render pass\n");
     VkAttachmentDescription attachmentDescription = {
         .flags = 0,
@@ -793,12 +797,13 @@ int main()
     /// Before we can create a command buffer, we need to create a command pool. The commands
     /// recorded in a command buffer must be compatible with the family of the queue they are
     /// sent over. The command pool is like a factory for command buffers, they are connected
-    /// to a specific queue family on our device. Command pools also let us record command
-    /// buffers in parallel in separate threads, with one pool per thread. Using a command
-    /// pool also makes allocating new command buffers more efficient that it would be
-    /// allocating them in isolation. We create the command pool with the
-    /// VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, which will make sure that command
-    /// buffers alloacted from the pool are put into a good initial state if they are re-used.
+    /// to a specific queue family on our device. Command pools let us record command buffers
+    /// in parallel in separate threads, with one pool per thread. Using a command pool also
+    /// makes allocating new command buffers more efficient that it would be allocating them
+    /// in isolation.
+    /// We create the command pool with the VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+    /// which will make sure that command buffers alloacted from the pool are put into a good
+    /// initial state if they are re-used.
     printf("Creating command pool\n");
     VkCommandPoolCreateInfo commandPoolCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -837,10 +842,13 @@ int main()
     /// This is the first time we are actually going "to do something", everything else up to
     /// this point is setup code. This will put the command buffer into "recording state".
     /// There exist several families of commands that can be recorded in a command buffer:
-    /// action, state, synchronization and launch commands.For action commands we will begin
+    /// action, state, synchronization and launch commands. For action commands we will begin
     /// a render pass, bind the graphics pipeline and draw our triangle. For synchronization
     /// we will make an image layout transition so that we can transfer it to our pixel
     /// readback buffer.
+    /// The VK_SUBPASS_CONTENTS_INLINE specify how we provide contents to the subpass, which
+    /// can either be done through recording to a primary command buffer "inline" (as belong)
+    /// or inderectly through secondary command buffers (advanced).
     printf("Recording command buffer\n");
     VkCommandBufferBeginInfo commandBufferBeginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
@@ -860,12 +868,12 @@ int main()
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
 
-    /// Efter the render pass we want change the image layout from the optimal layout for
-    /// depth/stencil attachment to an optimal as a source for transfer. We do that using an
-    /// image memory barrier to synchronize access before and after the layout transition.
-    /// The memory barrier will modify the layout of the image in-place. Note that this can
-    /// also be expressed using render subpass dependencies, which is probably more efficient
-    /// if we are using more than one subpass.
+    /// Efter the render pass we want to change the image layout from the optimal layout for
+    /// depth/stencil attachment to something better as a source for a transfer operation.
+    /// We do that using an image memory barrier to synchronize access before and after the
+    /// layout transition. The memory barrier will modify the layout of the image in-place.
+    /// Note that this can also be expressed using render subpass dependencies, which is
+    /// probably more efficient if we are using more than one subpass.
     /// We specify the "access scope" before the layout transition as those operations that
     /// writes to the depth/stencil attachment. We specify the access scope after the
     /// transition as those operations that do a transfer read. An access scope means what
@@ -907,6 +915,11 @@ int main()
     /// Hence, what we actually copy is both the depth and stencil aspects. Note that if we
     /// defined the format as VK_FORMAT_D32_SFLOAT_S8_UINT, then the stencil part would be
     /// dropped. The expected behaviour needs to be understood on a format by format basis.
+    /// Keep in mind that these rules apply for an image to buffer copy. Memory mapping an
+    /// image directly is not possible with our texel format, which is opaque by the spec.
+    /// Implementors are free to store the depth and stencil components in separate planes,
+    /// for example, and there are no guarantees on the byte packing.
+    /// Hence, copying the image to a buffer is a safe choice.
     VkBufferImageCopy imageRegion = {
         .imageSubresource = {
             .aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -916,11 +929,14 @@ int main()
         },
         .imageExtent = imageExtent
     };
-    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, pixelReadbackBuffer, 1, &imageRegion);
+    vkCmdCopyImageToBuffer(commandBuffer,
+                           image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           pixelReadbackBuffer,
+                           1, &imageRegion);
 
-    /// Finish the recoding of the command buffer.
-    /// This will put the command buffer into "executable state", that is, we can submit it
-    /// for execution.
+    /// Finish the recording of the command buffer. This will put the command buffer into
+    /// "executable state", that is, we can submit it for execution.
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
     {
         printf("Failed to end recording of command buffer\n");
@@ -1003,7 +1019,8 @@ int main()
     /// To convert from unorm to float we refer to the spec:
     /// https://registry.khronos.org/vulkan/specs/1.3/html/chap3.html#fundamentals-fixedconv
     float* depthData = (float*) malloc(pixelCount * sizeof(float));
-    for (uint32_t i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; ++i) {
+    for (uint32_t i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; ++i)
+    {
         uint32_t unormDepth = 0xFFFFFF & imageData[i];
         depthData[i] = ((float) unormDepth) / 0xFFFFFF;
         /// For visualization purposes we set the depth data to 0 if has not been written to
@@ -1033,7 +1050,7 @@ int main()
 
     /// Finally, tear down the system.
     /// Before destruction of each object we need to make sure it is not in use anymore, which
-    /// is easiest by waiting for the queue to become idle. All resources that are children of
+    /// is easiest by waiting for the device to become idle. All resources that are children of
     /// another resource needs to be released before their parent. The easiest way to do this
     /// is by destroying objects in reverse order of creation. Resources allocated from pools
     /// do not have to be manually freed, but we will do it anyways to show how it can be done

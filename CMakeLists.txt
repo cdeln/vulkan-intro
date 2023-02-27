@@ -2,8 +2,11 @@ cmake_minimum_required(VERSION 3.14)
 
 project(vulkan-intro)
 
-set(CMAKE_C_STANDARD 11)
+set(MAX_PHYSICAL_DEVICE_COUNT 4 CACHE STRING "Max number of physical devices")
 
+message(STATUS "MAX_PHYSICAL_DEVICE_COUNT = ${MAX_PHYSICAL_DEVICE_COUNT}")
+
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror")
 
 find_package(Vulkan REQUIRED)
@@ -24,7 +27,7 @@ endfunction(add_shader)
 
 add_shader(vertex_shader shader.vert)
 
-add_definitions(-DBUILD_TYPE="${CMAKE_BUILD_TYPE}")
+add_definitions(-DBUILD_TYPE="${CMAKE_BUILD_TYPE}" -DMAX_PHYSICAL_DEVICE_COUNT=${MAX_PHYSICAL_DEVICE_COUNT})
 
 add_executable(main main.c)
 target_link_libraries(main vulkan)
