@@ -764,6 +764,11 @@ int main()
         return EXIT_FAILURE;
     }
 
+    VkPipelineMultisampleStateCreateInfo pipelineMultisampleCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+    };
+
     VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 1,
@@ -773,6 +778,7 @@ int main()
         .pViewportState = &viewportStateCreateInfo,
         .pRasterizationState = &pipelineRasterizationStateCreateInfo,
         .pDepthStencilState = &pipelineDepthStencilStateCreateInfo,
+        .pMultisampleState = &pipelineMultisampleCreateInfo,
         .layout = pipelineLayout,
         .renderPass = renderPass
     };
