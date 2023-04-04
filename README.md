@@ -70,4 +70,4 @@ Run it
 
 Look at the result
 
-    cat out.bmp
+    cat out.dat
