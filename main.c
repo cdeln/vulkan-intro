@@ -748,7 +748,7 @@ int main()
         .lineWidth = 1.0f
     };
     VkPipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_TRUE,
         .depthWriteEnable = VK_TRUE,
         .depthCompareOp = VK_COMPARE_OP_LESS
@@ -777,8 +777,8 @@ int main()
         .pInputAssemblyState = &inputAssemblyStateCreateInfo,
         .pViewportState = &viewportStateCreateInfo,
         .pRasterizationState = &pipelineRasterizationStateCreateInfo,
-        .pDepthStencilState = &pipelineDepthStencilStateCreateInfo,
         .pMultisampleState = &pipelineMultisampleCreateInfo,
+        .pDepthStencilState = &pipelineDepthStencilStateCreateInfo,
         .layout = pipelineLayout,
         .renderPass = renderPass
     };
@@ -887,7 +887,7 @@ int main()
     /// To really understand access scopes I recommend reading the chapter regarding
     /// synchronization in the spec.
     VkImageMemoryBarrier imageMemoryBarrier = {
-        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
