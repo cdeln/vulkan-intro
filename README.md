@@ -3,9 +3,9 @@
 ## Background
 
 This is an introduction to the Vulkan core API.
-The introduction targets an audience without previous knowledge of Vulkan, thoughg background in OpenGL or some other graphics framework is preferable.
+The introduction targets an audience without previous knowledge of Vulkan, thorough background in OpenGL or some other graphics framework is preferable.
 For a reader belonging to this audience, Vulkan can be a bit intimidating at first glance.
-The offical specification (*the specs*) (https://registry.khronos.org/vulkan/specs/1.3-khr-extensions/html/)
+The official specification (*the specs*) (https://registry.khronos.org/vulkan/specs/1.3-khr-extensions/html/)
 and the official tutorial (https://vulkan-tutorial.com/) are quite dense.
 In order to learn Vulkan you will need to find resources on the right level for you.
 At the time of writing this document I am a beginner myself, and my intention is that this will aid others in learning Vulkan as well.
@@ -21,15 +21,15 @@ After reading through this the code here, I recommend reading through the classi
 - The official tutorial: https://vulkan-tutorial.com/
 
 Certain concepts in Vulkan are not well described in tutorials but are really well described in the specification.
-The specification is extremely dense, and is hard to read because it is aimed towards both implementors of the Vulkan API and its users at the same time.
-The specification aims to be non-ambigiuous, not necessarily easy to understand.
+The specification is extremely dense, and is hard to read because it is aimed towards both implementers of the Vulkan API and its users at the same time.
+The specification aims to be non-ambiguous, not necessarily easy to understand.
 With that said, I believe the following sections are good to read to properly understand Vulkan (after reading through tutorials ofc)
 
 - Execution and Memory Dependencies: https://registry.khronos.org/vulkan/specs/1.0/html/vkspec.html#synchronization-dependencies
 
 I highly recommend to tag along and write the code yourself, no copy pasting.
-Make sure you have a good setup with and editor and autocompletion, or your fingers will hate you.
-I personally use Vim with CoC plugin for autocompletion using Clangd 15.
+Make sure you have a good setup with and editor and auto-completion, or your fingers will hate you.
+I personally use Vim with CoC plugin for auto-completion using Clangd 15.
 Spin up a web browser with some documentation
 
 - Official 1.3 specs: https://registry.khronos.org/vulkan/specs/1.3/html
